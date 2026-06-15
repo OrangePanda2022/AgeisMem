@@ -1,0 +1,81 @@
+# 工作流
+
+## 记忆写入
+
+- 首先使用 LLM 对新进入的这条对话进行 进行提取 分辨这是几个事实。新建事实 并且填充所有需要填充的字段
+
+- 关于Tag的填充 先由LLM来给出关键词 通过Trigram + Embedding 在SQLite中检索Entity列表，召回所有有关Entity之后通过RRF合并 再LLM自行决定是在这个基础上使用已有的Entity还是添加新的Entity 并且根据相关性来让LLM给出权重 最后合成为一个Tag List
+
+- 通过向量粗略的召回可能有关的TopK个Fact节点 然后根据新的Fact节点的Tag列表来第二次筛选节点，最后根据上一次召回时间来筛选最近活跃的Fact节点
+
+- 将三层召回的结果取并集，然后加载他们的附近的边权重最高的3个Fact节点和边以及其所属Box的Summery 让LLM在这个子图上进行决策 是和某个节点新建边还是修改原来的某个边的权重或者修改边的类型
+
+- 如果产生冲突 即LLM在决策中返回 conflict=true 则在边或者Fact的元数据中留下修改历史记录 将Fact加入这个图
+
+- 将这个Fact存入SQLite
+
+## 记忆忘却 
+
+- 根据拓补中心度导向的艾宾浩斯衰减机制 决定 每个 Fact 的等级
+
+- 在每次事件写入后触发
+
+## 记忆读取
+
+- 从时间和关键字两个方面进行召回
+    
+    - 时间召回 直接在SQLite中按时间召回所有范围内的Fact
+    
+    - 关键字召回 同时由LLM来给出关键词 Trigram + Embedding 在SQLite中检索Entity列表 召回所有有关Entity之后通过RRF合并 然后对持有该Entity的Tag的Fact进行召回并且按照权重排序 和 向量匹配 找到TopK个Fact进行召回
+
+    - 当转移概率低于阈值时停止
+
+    - 
+
+\boxed{
+P(u \mid v, q, t) = \frac{1}{Z_v} \cdot \Gamma(v,u,t) \cdot \exp\!\Bigg( \lambda_{\text{sem}} \cdot \underbrace{\cos(\mathbf{e}_q, \mathbf{e}_u)}_{\text{语义项}} + \lambda_{\text{mem}} \cdot \underbrace{R(u,t)}_{\text{记忆项}} + \lambda_{\text{struct}} \cdot \underbrace{\Big[ \ln \omega(v,u) - \alpha \ln \deg(u) \Big]}_{\text{结构项}} \Bigg)
+}
+
+其中归一化常数：
+
+Z_v = \sum_{x \in \mathcal{N}(v)} \Gamma(v,x,t) \cdot \exp\!\Bigg( \lambda_{\text{sem}} \cos(\mathbf{e}_q, \mathbf{e}_x) + \lambda_{\text{mem}} R(x,t) + \lambda_{\text{struct}} \Big[ \ln \omega(v,x) - \alpha \ln \deg(x) \Big] \Bigg)
+
+时间硬门控 Γ(v,u,t)
+
+\Gamma(v,u,t) = \mathbb{1}\Big\{ t_{\text{valid}}(v,u) \leq t \leq t_{\text{invalid}}(v,u) \Big\}
+
+语义项 \cos(\mathbf{e}_q, \mathbf{e}_u)
+
+\cos(\mathbf{e}_q, \mathbf{e}_u) = \frac{\mathbf{e}_q \cdot \mathbf{e}_u}{\|\mathbf{e}_q\| \|\mathbf{e}_u\|} \in [-1, 1]
+
+\mathbf{e}_q 查询 q  的嵌入向量
+\mathbf{e}_u 邻居节点 u （实体或记忆片段）的嵌入向量
+
+值越接近 1 ，表示该节点与查询语义越相关。
+
+记忆项 R(u,t)
+
+R(u,t) = \exp\!\left( -\frac{t - r_u}{\tau \bigl(1 + \eta \ln(1 + n_u)\bigr)} \right) \in (0, 1]
+
+r_u 节点 u  最近一次被巩固/访问的时间戳
+n_u 节点 u  在记忆进化过程中被合并或提及的次数
+\tau 遗忘时间尺度（如 365 天）
+\eta 强化系数，控制重复提及对记忆稳固性的提升
+
+结构项 \ln \omega(v,u) - \alpha \ln \deg(u)
+
+\omega(v,u) = c_{vu} \cdot \iota(\text{type}_{vu}), \qquad \omega(v,u) \in (0, 1]
+
+c_{vu} LLM 提取关系 (v,u)  时的置信度
+\iota(\text{type}_{vu}) 关系类型的先验重要性
+\deg(u) 节点 u  的度数
+\alpha 度惩罚系数，防止游走总是跳向"超级枢纽"
+    
+- 对所有召回的Fact进行自适应查询条件路径检索 从相似度最高的Fact出发 逐步向召回更多的或者同Box的Fact方向前进
+
+- 将所有图中的连成的线连同每个Fact的原文和元数据及其边意义一起 进行基于MAS的预算分配之后 由LLM批量拼接成为新的关键记忆
+
+- 最后将合成的记忆和最近发生的N条对话一起发给LLM作为最终的记忆
+
+## 注释
+

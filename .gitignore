@@ -1,0 +1,39 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Datasets (large; download separately)
+LongMemEval/data/
+
+# Local SQLite DBs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Token/usage logs
+TokenLog/
+
+# Claude Code session files
+.claude/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Empty placeholder
+Empty File
