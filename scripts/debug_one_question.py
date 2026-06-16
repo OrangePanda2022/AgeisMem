@@ -15,8 +15,9 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logging.basicConfig(
@@ -42,15 +43,37 @@ def _resolve_data(data_arg: str) -> Path:
     raise FileNotFoundError(f"data not found: {data_arg}")
 
 
+_LME_DATE_RE = re.compile(
+    r"^\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*(?:\([^)]*\))?\s*"
+    r"(?:(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?\s*$"
+)
+
+
+def _parse_lme_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    m = _LME_DATE_RE.match(s)
+    if m:
+        y, mo, d, h, mi, se = m.groups()
+        # 统一打 UTC 标签：haystack_dates 没带时区，但 Fact.created_at 默认
+        # datetime.now(timezone.utc)，混 naive/aware 在 graph_walk 里会 TypeError。
+        return datetime(
+            int(y), int(mo), int(d),
+            int(h or 0), int(mi or 0), int(se or 0),
+            tzinfo=timezone.utc,
+        )
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
 def _max_haystack_time(dates: list[str]) -> datetime | None:
     parsed: list[datetime] = []
     for d in dates or []:
-        if not d:
-            continue
-        try:
-            parsed.append(datetime.fromisoformat(d))
-        except Exception:
-            continue
+        dt = _parse_lme_date(d)
+        if dt is not None:
+            parsed.append(dt)
     return max(parsed) if parsed else None
 
 
@@ -94,10 +117,7 @@ async def main() -> None:
 
     logger.info("ingesting %d sessions ...", len(sessions))
     for sid, sess, date_str in zip(sess_ids, sessions, dates):
-        try:
-            event_time = datetime.fromisoformat(date_str) if date_str else None
-        except Exception:
-            event_time = None
+        event_time = _parse_lme_date(date_str)
         for turn in sess:
             role = turn.get("role", "user")
             content = turn.get("content", "")

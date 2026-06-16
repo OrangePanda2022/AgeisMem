@@ -138,12 +138,32 @@ class Database:
         async with self._lock:
             if self._conn is not None:
                 return self._conn
-            conn = await aiosqlite.connect(self._path)
+            # aiosqlite 0.22 的 worker thread 默认非 daemon，调用方一旦漏 close()
+            # 主进程就会卡在 threading._shutdown() 等线程退出（实测会无限挂）。
+            # 必须在 .start() 之前（即 await connect() 之前）设 daemon=True。
+            # aiosqlite.connect() 返回 Connection 代理，Thread 已构造但未 start，
+            # __await__ 才会调 .start()。私有属性 _thread 在 0.20-0.22 都稳定。
+            conn_proxy = aiosqlite.connect(self._path)
+            thread = getattr(conn_proxy, "_thread", None)
+            if thread is None:
+                logger.warning(
+                    "aiosqlite Connection has no _thread attribute (version=%s); "
+                    "worker thread cannot be set daemon, process may hang on exit "
+                    "if close() is missed",
+                    getattr(aiosqlite, "__version__", "?"),
+                )
+            else:
+                thread.daemon = True
+            conn = await conn_proxy
             await conn.enable_load_extension(True)
-            # sqlite_vec.load 是同步 API；aiosqlite 提供 _execute 包装
+            # sqlite_vec.load 是同步 C API，必须在 worker thread 里跑（不能直接
+            # 在 event loop 调用，会污染 sqlite3 connection 的线程归属）。
+            # aiosqlite 提供的 _execute 私有方法是官方 sqlite_vec docs 推荐写法。
             await conn._execute(sqlite_vec.load, conn._conn)  # type: ignore[attr-defined]
             await conn.enable_load_extension(False)
             conn.row_factory = aiosqlite.Row
+            # synchronous=OFF：评测/单题场景下可接受（崩溃时丢未 fsync 的数据，
+            # 但每题独立 db 即丢即弃）；生产环境应改 NORMAL。
             await conn.execute("PRAGMA synchronous=OFF")
             await conn.execute("PRAGMA temp_store=MEMORY")
             await conn.executescript(SCHEMA_SQL)

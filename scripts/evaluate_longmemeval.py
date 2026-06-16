@@ -25,8 +25,9 @@ import asyncio
 import argparse
 import json
 import logging
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logging.basicConfig(
@@ -82,13 +83,37 @@ def _max_haystack_time(dates: list[str]) -> datetime | None:
     """取 haystack_dates 的最大值作为遗忘衰减参考时间。"""
     parsed: list[datetime] = []
     for d in dates or []:
-        if not d:
-            continue
-        try:
-            parsed.append(datetime.fromisoformat(d))
-        except Exception:
-            continue
+        dt = _parse_lme_date(d)
+        if dt is not None:
+            parsed.append(dt)
     return max(parsed) if parsed else None
+
+
+# LongMemEval 的 haystack_dates 格式形如 "2023/04/10 (Mon) 17:50"，
+# 不是合法 ISO8601；fromisoformat 会全部失败，导致事件时间退化为墙钟。
+_LME_DATE_RE = re.compile(
+    r"^\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*(?:\([^)]*\))?\s*"
+    r"(?:(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?\s*$"
+)
+
+
+def _parse_lme_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    m = _LME_DATE_RE.match(s)
+    if m:
+        y, mo, d, h, mi, se = m.groups()
+        # 统一打 UTC 标签：haystack_dates 没带时区，但 Fact.created_at 默认
+        # datetime.now(timezone.utc)，混 naive/aware 在 graph_walk 里会 TypeError。
+        return datetime(
+            int(y), int(mo), int(d),
+            int(h or 0), int(mi or 0), int(se or 0),
+            tzinfo=timezone.utc,
+        )
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
 
 
 async def main() -> None:
@@ -180,10 +205,7 @@ async def main() -> None:
             sess_ids = entry.get("haystack_session_ids", [])
 
             for sid, sess, date_str in zip(sess_ids, sessions, dates):
-                try:
-                    event_time = datetime.fromisoformat(date_str) if date_str else None
-                except Exception:
-                    event_time = None
+                event_time = _parse_lme_date(date_str)
                 for turn in sess:
                     role = turn.get("role", "user")
                     content = turn.get("content", "")

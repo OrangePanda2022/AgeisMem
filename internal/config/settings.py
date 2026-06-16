@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     embedding_max_concurrency: int = 16
     api_max_retries: int = 3
     api_retry_base_delay: float = 1.0  # 指数退避基数（秒）
+    # 单次调用硬超时（秒）。两层兜底：
+    #   1. SDK 层 httpx timeout（连接/读取/写入），由 socket close 强制中断
+    #   2. with_retry 外层 asyncio.wait_for（防止 SDK timeout 在某些网关下不触发）
+    # 经验：FACT_EXTRACTION 系 LLM 一般 5-15s，超过 30s 基本是网关挂了。
+    llm_call_timeout_s: float = 45.0
+    embedding_call_timeout_s: float = 20.0
+    judge_call_timeout_s: float = 30.0
 
     # ---- ForgettingService 遗忘服务参数 ----
     topology_decay_lambda: float = 1.0

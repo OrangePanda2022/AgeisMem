@@ -21,6 +21,7 @@ Embedding 客户端模块。
 
 import logging
 
+import httpx
 from volcenginesdkarkruntime import AsyncArk
 
 from internal.config.settings import settings
@@ -38,8 +39,14 @@ class EmbeddingClient:
     """
 
     def __init__(self) -> None:
-        # 初始化异步 Ark 客户端，使用配置文件中的 API Key
-        self._client = AsyncArk(api_key=settings.ark_api_key)
+        # SDK 默认 read=600s + max_retries=2，会和外层 with_retry 串成天文超时；
+        # 这里压到 timeout=embedding_call_timeout_s + max_retries=0，由外层兜底。
+        t = settings.embedding_call_timeout_s
+        self._client = AsyncArk(
+            api_key=settings.ark_api_key,
+            timeout=httpx.Timeout(t, connect=5.0),
+            max_retries=0,
+        )
         # 使用豆包 Embedding Vision 模型，支持文本和图像嵌入（当前仅使用文本功能）
         self._model = "doubao-embedding-vision-251215"
 
@@ -59,6 +66,7 @@ class EmbeddingClient:
             max_retries=settings.api_max_retries,
             base_delay=settings.api_retry_base_delay,
             label="embedding",
+            per_call_timeout=settings.embedding_call_timeout_s,
         )
         usage = getattr(resp, "usage", None)
         if usage is not None:

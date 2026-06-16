@@ -19,6 +19,7 @@ LLM 客户端模块。
 import json
 import logging
 
+import httpx
 from openai import AsyncOpenAI
 from json_repair import repair_json
 from internal.infra.models.llm.prompts.prompts import prompts
@@ -33,9 +34,14 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     def __init__(self) -> None:
         # 初始化异步 OpenAI 客户端，配置 DeepSeek 作为后端
+        # SDK 层 httpx 超时：connect 5s / read=write=pool 与外层 wait_for 一致；
+        # max_retries=0：避免 SDK 内部还做指数退避（我们外层 with_retry 已经做了）。
+        t = settings.llm_call_timeout_s
         self._client = AsyncOpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+            timeout=httpx.Timeout(t, connect=5.0),
+            max_retries=0,
         )
 
     # 大模型生成
@@ -73,6 +79,7 @@ class LLMClient:
             max_retries=settings.api_max_retries,
             base_delay=settings.api_retry_base_delay,
             label="llm",
+            per_call_timeout=settings.llm_call_timeout_s,
         )
         usage = getattr(message, "usage", None)
         if usage is not None:

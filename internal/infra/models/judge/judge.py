@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from anthropic import AsyncAnthropic
 
 from internal.config.settings import settings
@@ -31,9 +32,12 @@ class JudgeClient:
                 "JudgeClient: settings.judge_api_key / judge_base_url / judge_model "
                 "尚未配置，调用前请先填写。"
             )
+        t = settings.judge_call_timeout_s
         self._client = AsyncAnthropic(
             api_key=settings.judge_api_key or "EMPTY",
             base_url=settings.judge_base_url or None,
+            timeout=httpx.Timeout(t, connect=5.0),
+            max_retries=0,
         )
 
     async def judge(self, prompt: str, max_tokens: int = 10) -> str:
@@ -53,6 +57,7 @@ class JudgeClient:
             max_retries=settings.api_max_retries,
             base_delay=settings.api_retry_base_delay,
             label="judge",
+            per_call_timeout=settings.judge_call_timeout_s,
         )
         usage = getattr(message, "usage", None)
         if usage is not None:

@@ -35,18 +35,35 @@ async def with_retry(
     max_retries: int,
     base_delay: float,
     label: str = "api",
+    per_call_timeout: float | None = 90.0,
 ) -> T:
-    """指数退避重试。仅捕获网络/限速类异常，业务解析错误不重试。
+    """指数退避重试 + 单次调用硬超时兜底。
+
+    SDK 自带的 timeout 在某些网关（长连接/SSE keepalive）下不会触发；
+    out-of-band 用 asyncio.wait_for 兜底，超时算失败进入下一次重试。
 
     捕获策略：所有 Exception 都重试，但最后一次直接 raise。
     base_delay * 2**i + jitter(0, base_delay)。
+    per_call_timeout=None 表示禁用兜底（保留旧行为）。
     """
     last_exc: BaseException | None = None
     for attempt in range(max_retries + 1):
         try:
-            return await call()
+            if per_call_timeout is None:
+                return await call()
+            return await asyncio.wait_for(call(), timeout=per_call_timeout)
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError as e:
+            last_exc = e
+            logger.warning(
+                "%s call hard-timeout after %.1fs (attempt %d/%d)",
+                label, per_call_timeout, attempt + 1, max_retries + 1,
+            )
+            if attempt >= max_retries:
+                break
+            delay = base_delay * (2**attempt) + random.uniform(0, base_delay)
+            await asyncio.sleep(delay)
         except Exception as e:
             last_exc = e
             if attempt >= max_retries:

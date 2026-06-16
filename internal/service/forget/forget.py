@@ -75,6 +75,11 @@ class ForgettingService:
         for f in facts:
             ref = f.last_accessed_at or f.created_at
             delta_days = (now - ref).total_seconds() / 86400.0
+            # 防御负值：ref_time 是 haystack 最大日期（如 2023），但 ingest 期间
+            # 如果某条 fact 漏了 event_time、用了 datetime.now()（如 2026），
+            # delta_days 会变成大负数，下面 exp(-neg/small) 直接 OverflowError。
+            # 负值代表 fact 比参考时间还"新"，按 0 处理（retention=1.0）。
+            delta_days = max(0.0, delta_days)
             s_i = max(0.01, min(1.0, f.score))
             c_deg = deg_map[str(f.id)] / max_deg
             c_eig = eig_map[str(f.id)] / max_eig
