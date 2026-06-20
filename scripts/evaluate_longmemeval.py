@@ -206,18 +206,37 @@ async def main() -> None:
 
             for sid, sess, date_str in zip(sess_ids, sessions, dates):
                 event_time = _parse_lme_date(date_str)
-                for turn in sess:
+                for turn_idx, turn in enumerate(sess, start=1):
                     role = turn.get("role", "user")
                     content = turn.get("content", "")
+                    provenance = {
+                        "lme_session_id": sid,
+                        "lme_turn_index": turn_idx,
+                        "lme_turn_role": role,
+                    }
                     if role == "user":
-                        await pipeline.ingest(content, event_time=event_time, role="user")
+                        await pipeline.ingest(
+                            content, event_time=event_time, role="user",
+                            provenance=provenance,
+                        )
                     elif role == "assistant":
-                        await pipeline.ingest(content, event_time=event_time, role="assistant")
+                        await pipeline.ingest(
+                            content, event_time=event_time, role="assistant",
+                            provenance=provenance,
+                        )
 
             ref_time = _parse_lme_date(entry.get("question_date")) or _max_haystack_time(dates)
-            hypothesis = await pipeline.answer(entry["question"], reference_time=ref_time)
+            result = await pipeline.answer(
+                entry["question"], reference_time=ref_time, return_evidence=True,
+            )
+            hypothesis = result["answer"] if isinstance(result, dict) else result
+            evidence = result.get("evidence", []) if isinstance(result, dict) else []
 
-            await write_result({"question_id": qid, "hypothesis": hypothesis})
+            await write_result({
+                "question_id": qid,
+                "hypothesis": hypothesis,
+                "evidence": evidence,
+            })
             completed += 1
 
             logger.info("  [%d/%d] Q: %s", idx + 1, len(items), entry["question"][:60])
