@@ -1,6 +1,6 @@
 """LongMemEval hypothesis 打分脚本。
 
-复用项目内的 JudgeClient（Anthropic 协议，可指向任意兼容网关）按官方
+复用项目内的 JudgeClient（OpenAI 协议，可指向任意兼容网关）按官方
 LongMemEval 的 prompt 模板对 hypothesis 进行 yes/no 判断，输出整体准确率与
 按 question_type 分桶的准确率。
 
@@ -66,13 +66,14 @@ _TEMPLATE_KNOWLEDGE_UPDATE = (
 )
 
 _TEMPLATE_PREFERENCE = (
-    "I will give you a question, a rubric for desired personalized response, "
-    "and a response from a model. Please answer yes if the response satisfies "
-    "the desired response. Otherwise, answer no. The model does not need to "
-    "reflect all the points in the rubric. The response is correct as long as "
-    "it recalls and utilizes the user's personal information correctly.\n\n"
-    "Question: {q}\n\nRubric: {a}\n\nModel Response: {r}\n\n"
-    "Is the model response correct? Answer yes or no only."
+    "You are evaluating whether a model's response correctly captures "
+    "a user's personal preference. The model response does NOT need to "
+    "match the rubric word-for-word. As long as the model response "
+    "expresses the same preference direction and references the same "
+    "key personal information, it should be marked correct.\n\n"
+    "Question: {q}\n\nRubric (reference): {a}\n\nModel Response: {r}\n\n"
+    "Does the model response correctly express the user's preference? "
+    "Answer yes or no only."
 )
 
 _TEMPLATE_ABSTENTION = (

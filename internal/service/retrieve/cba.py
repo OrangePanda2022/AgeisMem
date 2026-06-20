@@ -79,11 +79,18 @@ class CBAService:
         """
         parts = ["[记忆片段]"]
 
-        # 按 created_at 升序排，便于时序推理；缺失时间的放在最后
-        sorted_facts = sorted(
-            scored_facts_with_budget,
+        # 偏好类 facts 优先排到最前面，帮助 LLM 聚焦偏好信息
+        pref_facts = [(f, b) for f, b in scored_facts_with_budget
+                      if f.metadata and f.metadata.Preference]
+        other_facts = [(f, b) for f, b in scored_facts_with_budget
+                       if not (f.metadata and f.metadata.Preference)]
+
+        # 其余 facts 按 created_at 升序排；缺失时间的放在最后
+        other_facts_sorted = sorted(
+            other_facts,
             key=lambda fb: (fb[0].created_at is None, fb[0].created_at),
         )
+        sorted_facts = pref_facts + other_facts_sorted
 
         for fact, budget in sorted_facts:
             content_budget = max(budget // 2, 80)

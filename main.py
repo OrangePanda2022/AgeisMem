@@ -128,7 +128,9 @@ class MemoryRetrievalPipeline:
             return "信息不足，无法回答。"
 
         # ---- 反向实体过滤（P2-3）：MAS 后检查 top-N 是否含 GT 预期实体 ----
-        # 若 LLM 推断的 expected_entities 在 top 召回中缺失，触发第二轮 keyword 召回扩展
+        # 若 LLM 推断的 missing_entities 在 top 召回中缺失，触发第二轮 keyword 召回扩展。
+        # 守卫：只当缺失实体 ≥ 2 且 top-10 里没有任何 fact 的 MAS ≥ 0.5 时才触发，
+        # 避免 preference 类问题上 extract_expected_entities 幻觉导致假阳性。
         try:
             top_for_check = min(10, len(scored))
             check_summary_parts = []
@@ -140,11 +142,22 @@ class MemoryRetrievalPipeline:
             expected = await self.container.llm.extract_expected_entities(
                 query, check_summary, debug=debug,
             )
-            missing_entities = expected.get("missing_in_top", [])
-            if missing_entities:
+            missing_entities = expected.get("missing_entities", []) or []
+            max_top_mas = max((s for _, s in scored[:top_for_check]), default=0.0)
+            should_trigger = (
+                len(missing_entities) >= 2
+                and max_top_mas < 0.5
+            )
+            if missing_entities and not should_trigger:
                 logger.info(
-                    "Expected entities missing in top-%d: %s — triggering reverse expansion",
-                    top_for_check, missing_entities,
+                    "Missing entities %s but guard skipped reverse expansion "
+                    "(count=%d, max_top_mas=%.3f)",
+                    missing_entities, len(missing_entities), max_top_mas,
+                )
+            if should_trigger:
+                logger.info(
+                    "Missing entities in top-%d: %s (max_top_mas=%.3f) — triggering reverse expansion",
+                    top_for_check, missing_entities, max_top_mas,
                 )
                 # 用缺失实体作为新 keywords 跑迭代召回
                 existing_ids = {str(f.id) for f, _ in scored}
@@ -169,6 +182,7 @@ class MemoryRetrievalPipeline:
                             "new_facts_count": len(expand_result.facts),
                             "expanded_count": len(expand_result.expanded_facts),
                             "triggered": True,
+                            "max_top_mas": max_top_mas,
                         })
                 else:
                     if debug is not None:
@@ -176,13 +190,15 @@ class MemoryRetrievalPipeline:
                             "missing_entities": missing_entities,
                             "new_facts_count": 0,
                             "triggered": True,
+                            "max_top_mas": max_top_mas,
                             "note": "no new facts found from missing entities",
                         })
             else:
                 if debug is not None:
                     debug.record("reverse_entity_expansion", {
-                        "missing_entities": [],
+                        "missing_entities": missing_entities,
                         "triggered": False,
+                        "max_top_mas": max_top_mas,
                     })
         except Exception as e:
             logger.warning("Reverse entity expansion failed: %s", e)
@@ -301,6 +317,37 @@ class MemoryRetrievalPipeline:
         # 4) 预算分配
         budgeted = await self.cba.allocate(scored, debug=debug)
 
+        # 偏好类问题：限制非偏好 facts 数量，避免偏好信息被淹没
+        is_preference = any(
+            kw in query.lower() for kw in
+            ["recommend", "suggest", "tips", "advice", "prefer",
+             "any ideas", "what should", "should i", "any tips",
+             "what kind", "any good", "looking for",
+             "应该", "推荐", "建议", "偏好", "有什么好"]
+        )
+        if is_preference:
+            pref_budgeted = [(f, b) for f, b in budgeted
+                             if f.metadata and f.metadata.Preference]
+            other_budgeted = [(f, b) for f, b in budgeted
+                              if not (f.metadata and f.metadata.Preference)]
+            # Keep all preference facts, cap others at 5
+            if len(pref_budgeted) > 0 and len(other_budgeted) > 5:
+                other_budgeted = other_budgeted[:5]
+                budgeted = pref_budgeted + other_budgeted
+                logger.info("Preference query: capped non-preference facts to 5, "
+                            "pref=%d other=%d total=%d",
+                            len(pref_budgeted), len(other_budgeted), len(budgeted))
+
+        # ---- P1-A: 上下文硬上限 — 避免长上下文淹没 top-MAS 信号 ----
+        # 现象：b0479f84/fca70973 等题 ctx≥50 facts，LLM 注意力被低相关 fact 抢走，
+        # top-3 MAS 命中的具体实体（如 "Brandon Flowers"）反而没写进 hypothesis。
+        # budgeted 已按 MAS 降序排列，直接取前 12 即可保留最相关 facts。
+        MAX_CONTEXT_FACTS = 12
+        if len(budgeted) > MAX_CONTEXT_FACTS:
+            logger.info("P1-A: hard capping context %d -> %d facts",
+                        len(budgeted), MAX_CONTEXT_FACTS)
+            budgeted = budgeted[:MAX_CONTEXT_FACTS]
+
         # 5) 构建上下文
         context = await self.cba.build_retrieval_context(
             budgeted, self.buffer, debug=debug,
@@ -310,8 +357,9 @@ class MemoryRetrievalPipeline:
         is_preference = any(
             kw in query.lower() for kw in
             ["recommend", "suggest", "tips", "advice", "prefer",
-             "any ideas", "what should", "should i",
-             "应该", "推荐", "建议", "偏好"]
+             "any ideas", "what should", "should i", "any tips",
+             "what kind", "any good", "looking for",
+             "应该", "推荐", "建议", "偏好", "有什么好"]
         )
         use_debate = settings.debate_mode_enabled and is_preference
 
