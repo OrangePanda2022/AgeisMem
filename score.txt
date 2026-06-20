@@ -1,0 +1,46 @@
+# LongMemEval 评测成绩
+
+## 2026-06-20 全量 500 题(并发 12,超时 1800s)
+
+模型: settings.llm_model (走 settings.judge_base_url 网关)
+数据: LongMemEval/data/longmemeval_oracle.json (500 题)
+评测脚本: scripts/evaluate_longmemeval.py + scripts/score_longmemeval.py
+hypothesis 输出: /tmp/lme_full500.jsonl
+评分输出: /tmp/lme_full500.jsonl.scored.jsonl
+
+### Overall
+
+- Overall Accuracy: 0.8100 (81.00%)
+- Task-averaged Accuracy: 0.8091 (80.91%)
+- Abstention Accuracy: 0.8000 (80.00%, 30 题)
+- scored: 500, errors: 0
+
+### By question_type
+
+| question_type              | accuracy | count |
+|----------------------------|----------|-------|
+| single-session-assistant   | 0.9643   | 56    |
+| single-session-user        | 0.9000   | 70    |
+| knowledge-update           | 0.8718   | 78    |
+| single-session-preference  | 0.6000   | 30    |
+| multi-session              | 0.7594   | 133   |
+| temporal-reasoning         | 0.7594   | 133   |
+
+### Token usage (judge)
+
+- judge calls: 500
+- prompt: 217575
+- completion: 180012
+- total: 397587
+
+### 主要短板(后续优化方向)
+
+- single-session-preference 60% (30 题只对 18 题)
+- multi-session 75.94%
+- temporal-reasoning 75.94%
+
+### 备注
+
+- 评测过程:首跑 32 并发触发 429 限流,降到 12 并发稳定;54 题超时(720s 不够)后用 1800s 超时重跑全部跑出
+- judge 评分脚本和 JudgeClient 接口对齐:judge.py 用 AsyncOpenAI + max_tokens=2048 + reasoning_effort="low",适配 mimo-v2.5-pro reasoning 模型
+- 本次 Overall 81.00% 未达 commit 阈值 91%,改动未提交

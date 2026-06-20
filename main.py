@@ -38,6 +38,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _normalize_provenance(p: dict | None) -> dict | None:
+    """把 provenance 字典的字段名归一为 source_*。
+
+    支持 source_* / lme_* 两套别名；缺省返回 None。
+    """
+    if not p:
+        return None
+    sid = p.get("source_session_id") or p.get("lme_session_id", "")
+    tidx = p.get("source_turn_index") if p.get("source_turn_index") is not None else p.get("lme_turn_index")
+    trole = p.get("source_turn_role") or p.get("lme_turn_role", "")
+    return {
+        "source_session_id": sid,
+        "source_turn_index": tidx,
+        "source_turn_role": trole,
+    }
+
+
 class MemoryRetrievalPipeline:
     """完整记忆管线编排器。"""
 
@@ -50,24 +67,54 @@ class MemoryRetrievalPipeline:
         self.buffer = MessageBuffer(max_size=20)
         self._forgetting = ForgettingService(self.container)
 
+    @staticmethod
+    def _evidence_list(scored: list[tuple]) -> list[dict]:
+        """把 MAS 评分后的 (Fact, score) 列表转成 evidence dict 列表。
+
+        rrf_score 字段填的是 MAS score（模型最终相关性评分），用于 score_retrieval.py
+        按降序排序；字段名保留 rrf_score 是为了对齐 scripts/score_retrieval.py 的约定。
+        """
+        return [
+            {
+                "fact_id": str(f.id),
+                "content": f.content,
+                "rrf_score": s,
+                "source_session_id": (f.metadata.source_session_id if f.metadata else ""),
+                "source_turn_index": (f.metadata.source_turn_index if f.metadata else None),
+                "source_turn_role": (f.metadata.source_turn_role if f.metadata else ""),
+            }
+            for f, s in scored
+        ]
+
+    @staticmethod
+    def _ret(text: str, scored: list[tuple], return_evidence: bool):
+        """统一 answer() 的返回形状：str 或 {answer, evidence}。"""
+        if return_evidence:
+            return {"answer": text, "evidence": MemoryRetrievalPipeline._evidence_list(scored)}
+        return text
+
     async def ingest(
         self,
         message: str,
         event_time: datetime | None = None,
         role: str = "user",
+        provenance: dict | None = None,
     ) -> None:
         """写入一条消息到记忆系统，同时更新对话缓冲区。
 
         role="user" 视为用户陈述；role="assistant" 视为助手提供的信息
         （如知识/推荐/事实陈述），同样进入 fact store，仅在原文前加
         [Speaker: assistant] 标记，便于 LLM 抽取出第三人称事实。
+
+        provenance 可选 dict，记录消息来源（如评测场景的 session_id/turn_index）。
+        支持 source_* 和 lme_* 两套字段名别名，统一归一为 source_* 后透传。
         """
         write_svc = WriteService(self.container)
         if role == "assistant":
             tagged = f"[Speaker: assistant]\n{message}"
         else:
             tagged = message
-        facts = await write_svc.ingest(tagged, event_time)
+        facts = await write_svc.ingest(tagged, event_time, provenance=_normalize_provenance(provenance))
         logger.info("Ingested %d facts from %s message", len(facts), role)
         self.buffer.add(role if role in ("user", "assistant") else "user", message)
 
@@ -78,13 +125,19 @@ class MemoryRetrievalPipeline:
         *,
         debug_path: str | None = None,
         qid: str = "ad-hoc",
-    ) -> str:
+        return_evidence: bool = False,
+    ):
         """基于记忆检索回答用户问题。
 
         完整流程：
           query → forget → embed → recall(含投机召回) → MAS →
           [迭代召回: 充分性检查 → 查询扩展 → 定向召回] →
           CBA → [辩论模式/单轮] → LLM answer
+
+        return_evidence=True 时返回 {"answer": str, "evidence": list[dict]}，
+        evidence 为最终 MAS 评分后的全部 fact 列表（按 mas_score 降序），
+        每条含 fact_id/content/rrf_score(=mas_score)/source_session_id/
+        source_turn_index/source_turn_role，用于检索评测对齐 LongMemEval。
         """
         debug = DebugCollector(qid=qid, query=query) if debug_path else None
 
@@ -111,7 +164,7 @@ class MemoryRetrievalPipeline:
             if debug is not None:
                 debug.record("llm_answer", {"skipped": "no facts recalled"})
                 debug.dump(debug_path)
-            return "信息不足，无法回答。"
+            return self._ret("信息不足，无法回答。", [], return_evidence)
 
         logger.info("Recalled %d facts (%d expanded via graph walk)",
                      len(recall_result.facts), len(recall_result.expanded_facts))
@@ -125,12 +178,10 @@ class MemoryRetrievalPipeline:
             if debug is not None:
                 debug.record("llm_answer", {"skipped": "no scored facts"})
                 debug.dump(debug_path)
-            return "信息不足，无法回答。"
+            return self._ret("信息不足，无法回答。", [], return_evidence)
 
         # ---- 反向实体过滤（P2-3）：MAS 后检查 top-N 是否含 GT 预期实体 ----
-        # 若 LLM 推断的 missing_entities 在 top 召回中缺失，触发第二轮 keyword 召回扩展。
-        # 守卫：只当缺失实体 ≥ 2 且 top-10 里没有任何 fact 的 MAS ≥ 0.5 时才触发，
-        # 避免 preference 类问题上 extract_expected_entities 幻觉导致假阳性。
+        # 若 LLM 推断的 expected_entities 在 top 召回中缺失，触发第二轮 keyword 召回扩展
         try:
             top_for_check = min(10, len(scored))
             check_summary_parts = []
@@ -142,22 +193,11 @@ class MemoryRetrievalPipeline:
             expected = await self.container.llm.extract_expected_entities(
                 query, check_summary, debug=debug,
             )
-            missing_entities = expected.get("missing_entities", []) or []
-            max_top_mas = max((s for _, s in scored[:top_for_check]), default=0.0)
-            should_trigger = (
-                len(missing_entities) >= 2
-                and max_top_mas < 0.5
-            )
-            if missing_entities and not should_trigger:
+            missing_entities = expected.get("missing_in_top", [])
+            if missing_entities:
                 logger.info(
-                    "Missing entities %s but guard skipped reverse expansion "
-                    "(count=%d, max_top_mas=%.3f)",
-                    missing_entities, len(missing_entities), max_top_mas,
-                )
-            if should_trigger:
-                logger.info(
-                    "Missing entities in top-%d: %s (max_top_mas=%.3f) — triggering reverse expansion",
-                    top_for_check, missing_entities, max_top_mas,
+                    "Expected entities missing in top-%d: %s — triggering reverse expansion",
+                    top_for_check, missing_entities,
                 )
                 # 用缺失实体作为新 keywords 跑迭代召回
                 existing_ids = {str(f.id) for f, _ in scored}
@@ -182,7 +222,6 @@ class MemoryRetrievalPipeline:
                             "new_facts_count": len(expand_result.facts),
                             "expanded_count": len(expand_result.expanded_facts),
                             "triggered": True,
-                            "max_top_mas": max_top_mas,
                         })
                 else:
                     if debug is not None:
@@ -190,15 +229,13 @@ class MemoryRetrievalPipeline:
                             "missing_entities": missing_entities,
                             "new_facts_count": 0,
                             "triggered": True,
-                            "max_top_mas": max_top_mas,
                             "note": "no new facts found from missing entities",
                         })
             else:
                 if debug is not None:
                     debug.record("reverse_entity_expansion", {
-                        "missing_entities": missing_entities,
+                        "missing_entities": [],
                         "triggered": False,
-                        "max_top_mas": max_top_mas,
                     })
         except Exception as e:
             logger.warning("Reverse entity expansion failed: %s", e)
@@ -317,37 +354,6 @@ class MemoryRetrievalPipeline:
         # 4) 预算分配
         budgeted = await self.cba.allocate(scored, debug=debug)
 
-        # 偏好类问题：限制非偏好 facts 数量，避免偏好信息被淹没
-        is_preference = any(
-            kw in query.lower() for kw in
-            ["recommend", "suggest", "tips", "advice", "prefer",
-             "any ideas", "what should", "should i", "any tips",
-             "what kind", "any good", "looking for",
-             "应该", "推荐", "建议", "偏好", "有什么好"]
-        )
-        if is_preference:
-            pref_budgeted = [(f, b) for f, b in budgeted
-                             if f.metadata and f.metadata.Preference]
-            other_budgeted = [(f, b) for f, b in budgeted
-                              if not (f.metadata and f.metadata.Preference)]
-            # Keep all preference facts, cap others at 5
-            if len(pref_budgeted) > 0 and len(other_budgeted) > 5:
-                other_budgeted = other_budgeted[:5]
-                budgeted = pref_budgeted + other_budgeted
-                logger.info("Preference query: capped non-preference facts to 5, "
-                            "pref=%d other=%d total=%d",
-                            len(pref_budgeted), len(other_budgeted), len(budgeted))
-
-        # ---- P1-A: 上下文硬上限 — 避免长上下文淹没 top-MAS 信号 ----
-        # 现象：b0479f84/fca70973 等题 ctx≥50 facts，LLM 注意力被低相关 fact 抢走，
-        # top-3 MAS 命中的具体实体（如 "Brandon Flowers"）反而没写进 hypothesis。
-        # budgeted 已按 MAS 降序排列，直接取前 12 即可保留最相关 facts。
-        MAX_CONTEXT_FACTS = 12
-        if len(budgeted) > MAX_CONTEXT_FACTS:
-            logger.info("P1-A: hard capping context %d -> %d facts",
-                        len(budgeted), MAX_CONTEXT_FACTS)
-            budgeted = budgeted[:MAX_CONTEXT_FACTS]
-
         # 5) 构建上下文
         context = await self.cba.build_retrieval_context(
             budgeted, self.buffer, debug=debug,
@@ -357,9 +363,8 @@ class MemoryRetrievalPipeline:
         is_preference = any(
             kw in query.lower() for kw in
             ["recommend", "suggest", "tips", "advice", "prefer",
-             "any ideas", "what should", "should i", "any tips",
-             "what kind", "any good", "looking for",
-             "应该", "推荐", "建议", "偏好", "有什么好"]
+             "any ideas", "what should", "should i",
+             "应该", "推荐", "建议", "偏好"]
         )
         use_debate = settings.debate_mode_enabled and is_preference
 
@@ -387,7 +392,7 @@ class MemoryRetrievalPipeline:
         finally:
             if debug is not None:
                 debug.dump(debug_path)
-        return answer_text
+        return self._ret(answer_text, scored, return_evidence)
 
     async def answer_without_ingest(self, query: str) -> str:
         """仅检索不写入（用于评测场景）。"""

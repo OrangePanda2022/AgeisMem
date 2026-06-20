@@ -47,8 +47,17 @@ class WriteService:
     def __init__(self, container: Container) -> None:
         self.c = container
 
-    async def ingest(self, raw_message: str, event_time: datetime | None = None) -> list[Fact]:
-        """处理一条对话消息：抽取 N 个 fact，逐个写入图。返回写入的 facts。"""
+    async def ingest(
+        self,
+        raw_message: str,
+        event_time: datetime | None = None,
+        provenance: dict | None = None,
+    ) -> list[Fact]:
+        """处理一条对话消息：抽取 N 个 fact，逐个写入图。返回写入的 facts。
+
+        provenance（可选）携带消息来源信息（source_session_id/source_turn_index/
+        source_turn_role），写入到每个新 fact 的 metadata，用于评测场景回溯。
+        """
         ts_str = event_time.date().isoformat() if event_time else ""
         try:
             extraction = await self.c.llm.extract_facts(raw_message, event_time=ts_str)
@@ -70,7 +79,7 @@ class WriteService:
         for item in facts_list:
             try:
                 pre_entities = item.get("entities", [])
-                fact = await self._process_fact(item, raw_message, event_time, pre_entities)
+                fact = await self._process_fact(item, raw_message, event_time, pre_entities, provenance=provenance)
                 if fact:
                     results.append(fact)
             except Exception as e:
@@ -80,11 +89,17 @@ class WriteService:
     async def _process_fact(
         self, item: dict, raw_message: str, event_time: datetime | None,
         pre_extracted_entities: list[str] | None = None,
+        *,
+        provenance: dict | None = None,
     ) -> Fact | None:
         content = (item.get("content") or "").strip()
         if not content:
             return None
         meta = _meta_from_dict(item.get("metadata", {}))
+        if provenance:
+            meta.source_session_id = provenance.get("source_session_id", "")
+            meta.source_turn_index = provenance.get("source_turn_index")
+            meta.source_turn_role = provenance.get("source_turn_role", "")
         if event_time and meta.MentionedTime is None:
             meta.MentionedTime = event_time
 

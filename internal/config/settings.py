@@ -75,9 +75,6 @@ class Settings(BaseSettings):
     retrieve_lambda_trigram: float = 0.2
 
     # ---- MASManager 多智能体系统权重 ----
-    # tier_boost 调低（0.15→0.05），semantic_match 提高（0.35→0.45）：
-    # 防止 L0/L1 fact 仅靠访问频次把语义相关度更高的 L3 fact 压低
-    # 详见 SSP debug 分析：09d032c9/95228167/38146c39 三题因此错
     mas_weights: dict = {
         "semantic_match": 0.45,
         "edge_weight": 0.20,
@@ -94,7 +91,7 @@ class Settings(BaseSettings):
     debate_mode_enabled: bool = False
     debate_mode_specialists: int = 3
 
-    # ---- Speculative retrieval (draft-then-verify) ----
+    # ---- Speculative retrieval ----
     speculative_retrieval_enabled: bool = True
     speculative_confidence_threshold: float = 0.8
 

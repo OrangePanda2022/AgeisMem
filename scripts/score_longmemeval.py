@@ -197,9 +197,7 @@ async def main() -> None:
                 # 导致 "yes" in resp 误判 False。
                 # 修：max_tokens=2048 + reasoning_effort="low"，让模型完整输出 yes/no，
                 # 再从末尾抽取最终的 yes/no 判定。
-                resp = await judge_client.judge(
-                    prompt, max_tokens=2048, temperature=0.0, reasoning_effort="low",
-                )
+                resp = await judge_client.judge(prompt, max_tokens=2048)
             except Exception as e:
                 logger.error("judge %s failed: %s", qid, e)
                 n_errors += 1

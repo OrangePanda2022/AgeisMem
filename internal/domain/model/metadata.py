@@ -13,4 +13,7 @@ class Metadata:
     HappendTime: datetime | None = None
     MentionedTime: datetime | None = None
     History: List[str] | None = None
+    source_session_id: str = ""
+    source_turn_index: int | None = None
+    source_turn_role: str = ""
 

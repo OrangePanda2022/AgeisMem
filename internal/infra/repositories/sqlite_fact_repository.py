@@ -66,6 +66,9 @@ class SQLiteFactRepository(FactRepository):
                 "HappendTime": _iso(meta.HappendTime),
                 "MentionedTime": _iso(meta.MentionedTime),
                 "History": meta.History,
+                "source_session_id": meta.source_session_id,
+                "source_turn_index": meta.source_turn_index,
+                "source_turn_role": meta.source_turn_role,
             },
             ensure_ascii=False,
         )
@@ -314,6 +317,9 @@ class SQLiteFactRepository(FactRepository):
             HappendTime=_parse(meta_dict.get("HappendTime")),
             MentionedTime=_parse(meta_dict.get("MentionedTime")),
             History=meta_dict.get("History"),
+            source_session_id=meta_dict.get("source_session_id", ""),
+            source_turn_index=meta_dict.get("source_turn_index"),
+            source_turn_role=meta_dict.get("source_turn_role", ""),
         )
         # Tags
         tag_rows = await self._db.fetchall(

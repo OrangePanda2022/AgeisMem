@@ -221,14 +221,6 @@ edge_changes 每项 schema（仅 LINK / UPDATE 用）：
 - "Adobe Premiere Pro 的高级设置" → "用户偏好针对 Adobe Premiere Pro 高级设置的学习资源"
 核心原则：**偏好方向可跨场景适用，但必须以用户实际提到的具体品牌/地点/工具作为偏好来源的证据**。让 reviewer 一眼看到"用户是因为用过 X、选过 Y、说过 Z 才有这个偏好"。
 
-**第二步前置：实体清单枚举（P1-B，防止漏选关键锚点）**
-在写最终答案之前，你必须先在心里/草稿里**完整枚举**出记忆上下文中所有与问题主题相关的具体实体（人名、品牌、地点、产品名、宠物名、设备名等），然后判断哪些是用户实际拥有/选择/经历过的（而非助手建议或泛指）。
-- 错误示范：上下文含 "用户在丹佛见到 Brandon Flowers" + "用户热爱丹佛音乐场景" + "Red Rocks Park" + "Denver Folk Festival" → 答案只提了 "Denver Folk Festival / Red Rocks / Jazz Festival" → **漏掉了 Brandon Flowers**（最高 MAS 且是用户最具体的经历）
-- 正确做法：先把上下文里所有"用户实际做过/见过/拥有"的具体实体列全，再抽象偏好方向，并保留全部 ≥2 个最具体的作为锚点。**宁可多写一个具体实体也不要漏掉用户最具体的那一次经历**。
-- 如果上下文里有"用户拥有 X""用户最近买了 Y""用户选择了 Z"这类具体经历，且 X/Y/Z 与问题主题相关，**必须**将其中至少一个写进偏好锚点（不能因为"它看起来是事实而非偏好"就跳过）。
-- 用户拥有的具体物品/设备（如"iPhone 13 Pro""Garmin bike computer""cat Luna"）必须出现在锚点里——即使问题没直接问它们，因为它们决定了"兼容性""用户当前 setup"这个偏好维度。
-- 用户经历过的具体事件/地点/演出（如"见到 Brandon Flowers""去了 Red Rocks"）必须作为偏好来源证据，不能只列助手推荐的同类场所。
-
 **第三步：写出偏好方向 + 不偏好方向 + 具体锚点**
 格式：用户偏好[抽象方向]的建议，如[1-2 个用户实际提到过的具体品牌/地点/工具名作为偏好证据]。用户不会偏好[相反方向]。
 
@@ -243,41 +235,12 @@ edge_changes 每项 schema（仅 LINK / UPDATE 用）：
   问题="推荐迈阿密酒店？"→ 回答="推荐 Kimpton Angler's Hotel，它有阳台热水浴缸和屋顶泳池"（直接给具体产品推荐，不是偏好描述）
   问题="有什么烘焙建议？"→ 回答="1. 使用白糖+红糖组合 2. 室温黄油 3. 不要过度混合面糊..."（操作步骤，不是偏好描述）
 
-Mode A 高频失败模式（以下四类必须避免，违反即不合格）：
-
-  A1. 给操作步骤/教程（而非偏好描述）：
-    问题="有什么烘焙建议？"→ 错误答案="1. 糖粉与红糖混合 2. 室温软化黄油 3. 烤箱预热175度..."
-    正确答案="用户偏好基于其柠檬罂粟籽蛋糕成功经验的烘焙建议，如该柠檬罂粟籽食谱的变体或类似风格的甜点。用户不会偏好过于复杂或不熟悉的食谱。"
-
-  A2. 给具体产品/地点推荐（而非偏好描述）：
-    问题="主题公园周末有什么建议？"→ 错误答案="您可以致电 Universal Studios Hollywood VIP 团队 (818) 622-8477 预订 Gourmet Buffet..."
-    正确答案="用户偏好兼顾刺激项目和特色活动的主题公园建议，如他们在 Disneyland Halloween Time、Knott's Berry Farm 等地的过往体验风格。用户不会偏好缺乏特色活动的基础门票建议。"
-
-  A3. 被上下文实体带偏跑题（最危险！）：
-    问题="有什么纪录片推荐？"→ 记忆含《Chasing Coral》(珊瑚礁纪录片) → 错误答案="Belize 提供丰富的珊瑚礁生态旅游：浮潜、潜水、Blue Hole..."（被"珊瑚礁"实体带偏到讲 Belize 旅游）
-    正确答案="用户偏好类似《Our Planet》《Free Solo》《Tiger King》风格的自然/野生动物/人物纪录片建议，如与这些已观看纪录片主题相近的影片。用户不会偏好与其过往观看风格不符的纪录片。"
-    规则：即使上下文里的某条 fact 主题与问题相关，也必须回答"用户偏好什么类型的建议"，而不是复述该 fact 的内容或延伸到该 fact 提及的具体事物。
-
-  A4. 给因果解释/事实陈述（而非偏好描述）：
-    问题="我的车周日骑行表现更好，有什么建议？"→ 错误答案="表现提升可能是因为：(1) 你2月1日换了链条和飞轮 (2) 你选了低流量路线..."（解释原因而非偏好）
-    正确答案="用户偏好结合其近期车辆维护经历（如链条和飞轮更换）的骑行建议，以及与其低流量路线选择风格一致的路线规划建议。用户不会偏好脱离其已有维护和路线经验的通用骑行建议。"
-
 禁止事项：
 - 禁止照搬记忆中所有具体细节作为偏好描述（应抽象出方向）
 - 禁止把偏好描述抽空到只剩抽象方向而完全不带任何具体品牌/地点/工具锚点（必须保留至少 2 个用户实际提到过的具体名词作为偏好来源证据）
-- **禁止用上位词/同义词替换用户原话里的具体实体（P1-C 反概括规则）**：
-  - 用户说 "muscovado sugar / brown sugar" → 禁止写成 "warm aromatic spices" 或 "rich sweetener"（丢了糖这个具体物）
-  - 用户说 "cat Luna" → 禁止写成 "pet" 或 "animal"（丢了名字+种类）
-  - 用户说 "iPhone 13 Pro" → 禁止写成 "smartphone" 或 "Apple device"（丢了具体型号）
-  - 用户说 "Brandon Flowers" → 禁止写成 "a famous singer" 或 "live music frontman"
-  - 用户说 "Garmin bike computer" → 禁止写成 "a bike gadget" 或 "cycling accessory"
-  - 通用化方向可以抽象，但**原具体名词必须至少出现一次**（在锚点位置）
 - 禁止列举具体产品名称作为推荐（但保留用户**已提到过的**品牌/工具/地点作为偏好证据是允许的）
-- 禁止给出具体数字、价格、时间表、电话号码、预订方式
+- 禁止给出具体数字、价格、时间表
 - 禁止直接回答"是/否"或给出行动建议
-- 禁止给操作步骤、教程、配方、预订流程（A1/A2 类错误）
-- 禁止被上下文里某条 fact 的具体内容带偏，去复述或延伸该 fact 的事实（A3 类错误）
-- 禁止给因果解释、性能分析、技术说明（A4 类错误）
 - 禁止用中文回答英文问题（保持与问题相同的语言）
 
 偏好提取方法：
@@ -295,8 +258,6 @@ Mode A 高频失败模式（以下四类必须避免，违反即不合格）：
 A. 你的回答只能引用上下文中出现过的实体和事实。如果上下文包含关于 X 的信息而问题是关于 Y，你必须回答 Y 而不是 X，即使你对 X 了解更多。
 B. 区分事实性问题（what/when/where/who/how many/how long）和推荐性问题。对于事实性问题，从上下文中提取精确信息回答，绝不能给出推荐或建议。
 C. 如果上下文中没有足够信息回答问题，回答"根据现有记忆无法确定"而非编造或猜测。
-D. 拒答守卫（避免误拒）：仅当上下文中与问题主题相关的 fact 数量 < 3 时才允许回答"无法确定"。如果上下文有 ≥ 3 条与问题主题相关的 fact（即便没有直接命中问题字面词），必须从中抽象出偏好方向并回答，不允许以"没有直接关于 X 的记忆"为由拒答。偏好类问题的答案本就是从相关经历抽象而来，不要求 fact 字面包含问题里的每个词。
-   - 错误示例：问题="高中同学聚会要不要参加？"，上下文有"用户参加辩论队""用户上 AP 经济学课""用户高中朋友毕业后工作"等 3+ 条高中相关 fact → 禁止回答"没有关于同学聚会偏好的信息"，必须从这些高中经历抽象出"用户偏好基于其高中辩论队/AP 经济课等正面经历的建议"。
 
 ═══ 时间推理规则 ═══
 - 每条记忆片段带时间戳 [YYYY-MM-DDTHH:MM:SS+ZZ:ZZ]。
@@ -353,43 +314,24 @@ D. 拒答守卫（避免误拒）：仅当上下文中与问题主题相关的 f
     # =========================================================================
     # 反向实体抽取 System Prompt
     # 输入：query + top-N MAS scored facts
-    # 输出：{"present_entities":[...], "missing_entities":[...]}
-    # 用于：检测召回是否漏掉了用户已经提到过、但 top_facts 里没出现的实体
+    # 输出：{"expected_entities":["string", ...], "missing_in_top":["string", ...]}
+    # 用于：检测召回是否漏掉了用户应该提到过的具体实体
     # =========================================================================
     EXPECTED_ENTITY_SYSTEM = """\
-You are a memory recall auditor. Given a user question and the top retrieved memory facts, identify entities that the user has ALREADY mentioned in past conversations about this topic but that are MISSING from the retrieved facts.
+You are an entity expectation generator. Given a user question and the top retrieved memory facts, output:
+1. `expected_entities`: 2-5 specific noun entities (brands, places, tools, item names, product models) that a COMPLETE answer to this question would NEED to reference — based on the question topic. These are entities the user has likely mentioned before in conversations about this topic.
+2. `missing_in_top`: subset of `expected_entities` that do NOT appear in the top retrieved facts. If all expected entities are present, this is an empty list.
 
-## Critical Rules
-
-1. DO NOT invent entities based on the question topic. You can only flag an entity as missing if you have POSITIVE EVIDENCE from the user's question wording that the user has a specific item in mind.
-   - For "I noticed my bike performs better during Sunday group ride" — the user mentions their bike and Sunday group ride, so those are present entities. You CANNOT infer they have a Garmin, a Specialized brand, or any other specific gear unless they say so.
-   - For "Any tips for rearranging bedroom furniture?" — generic, NO missing entities. Do not invent "dresser", "mid-century modern", etc.
-
-2. Only flag a missing entity when the user's question explicitly references something specific (a name, a brand, a place, a date, a number) that is NOT echoed in any retrieved fact.
-   - User says "my reunion at Springfield High School" but no fact mentions "Springfield" → missing: ["Springfield High School"]
-   - User says "What should I bring to my Denver trip?" and facts mention Red Rocks + The Ship Rock Grille → no missing entity (the city is in the question, the venues are in facts)
-
-3. The output `present_entities` is the list of specific noun entities that DO appear in the retrieved facts (extracted from fact content, not invented). This grounds the audit.
-
-4. `missing_entities` must be EMPTY if you have no direct evidence from the question that a specific named thing is missing. Empty is the safe default.
-
-## Examples
-
-Input: query="Any tips for rearranging bedroom furniture?", facts contain general furniture advice
-Output: {"present_entities": ["furniture", "bedroom"], "missing_entities": []}
-
-Input: query="Any new coffee creamer recipe recommendations?", facts mention oat milk + maple syrup
-Output: {"present_entities": ["oat milk", "maple syrup"], "missing_entities": []}
-
-Input: query="I noticed my bike performs better during Sunday group ride", facts mention chain replacement but NOT the Garmin computer the user also owns
-Output: {"present_entities": ["chain", "Sunday group ride"], "missing_entities": []}
-(Do NOT flag "Garmin" as missing — the user did not mention it in the question. Only flag what the user explicitly references.)
-
-Input: query="Can you recommend resources for my Adobe Premiere Pro video editing?", facts mention Final Cut Pro but NOT Premiere Pro
-Output: {"present_entities": ["Final Cut Pro"], "missing_entities": ["Adobe Premiere Pro"]}
+Rules:
+- Each entity must be a specific noun or proper noun phrase (e.g., "Adobe Premiere Pro", "Fender Stratocaster", "Suica card", "almond milk"). NOT abstract category words like "editing software" or "guitar".
+- Base `expected_entities` on what a user with rich prior conversation history on this topic would have mentioned.
+- For "Any tips for rearranging bedroom furniture?" → expected: ["bedroom","dresser","furniture","mid-century modern"] (user likely mentioned specific items)
+- For "Any new coffee creamer recipe recommendations?" → expected: ["almond milk","vanilla","honey","creamer"]
+- For "What to look for in a new guitar?" → expected: ["Fender Stratocaster","Gibson Les Paul","guitar brand"]
+- For "Hotel for Miami trip?" → expected: ["rooftop pool","hot tub","balcony","ocean view"]
 
 Output JSON only:
-{"present_entities": ["string", ...], "missing_entities": ["string", ...]}
+{"expected_entities": ["string", ...], "missing_in_top": ["string", ...]}
 """
 
     # =========================================================================

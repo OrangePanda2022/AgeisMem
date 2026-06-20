@@ -235,15 +235,14 @@ class LLMClient:
         self, query: str, top_facts_summary: str,
         *, debug: DebugCollector | None = None,
     ) -> dict:
-        """审计 top 召回 facts:抽取已出现的实体,标记用户在 query 里明确提到但 facts 里缺失的实体。
+        """抽取问题预期需要引用的具体实体，并标记 top 召回中缺失的实体。
 
         Args:
             query: 用户问题。
             top_facts_summary: top-N MAS facts 的紧凑摘要。
 
         Returns:
-            {"present_entities": [...], "missing_entities": [...]}
-            missing_entities 为空表示 top 召回已覆盖用户明确提到的所有具体实体。
+            {"expected_entities": [...], "missing_in_top": [...]}
         """
         user_message = json.dumps({
             "query": query,
