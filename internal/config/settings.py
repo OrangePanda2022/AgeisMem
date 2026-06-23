@@ -30,8 +30,14 @@ class Settings(BaseSettings):
 
     # ---- 外部 API 并发与重试 ----
     # 客户端层全局信号量限流，避免大并发评测撞限速。
-    llm_max_concurrency: int = 48
-    embedding_max_concurrency: int = 16
+    # gpt-oss-120b 受 TPM(tokens/min) 限制：48 路并发 LLM 调用会瞬间撞 TPM，
+    # with_retry 退避耗尽 8 次重试 → 烧满单题超时（c48 全量实测 47/48 timeout，雪崩）。
+    # s_cleaned 比 oracle 重得多（haystack 更长，单题 LLM 调用更多）。双账号 × 24 LLM 并发
+    # 实测把 LLM TPM 打满（926 次 TPM Ratelimit / 8min，0 题落盘，且不收敛）——属于不可恢复 429。
+    # 24→12 仍偏高（~125 429/min），用户指令继续降到 6。embedding 几乎不触发 429，维持 24。
+    # 参考 [[aegismem-429-tolerance]]：仅 LLM TPM 持续打满且不收敛才需降并发。
+    llm_max_concurrency: int = 6
+    embedding_max_concurrency: int = 24
     api_max_retries: int = 8
     api_retry_base_delay: float = 2.0  # 指数退避基数（秒），8次重试最大延迟~256s，足以跨过RPM窗口
     # 单次调用硬超时（秒）。两层兜底：
@@ -91,9 +97,15 @@ class Settings(BaseSettings):
     debate_mode_enabled: bool = False
     debate_mode_specialists: int = 3
 
-    # ---- Speculative retrieval ----
-    speculative_retrieval_enabled: bool = True
+    # ---- Speculative retrieval (Draft-then-Verify：仅 vec 一路草稿 + LLM 充分性校验) ----
+    # 关闭后每次查询都走完整 4 路召回（bm25+vec+tag+trigram RRF），不跳过。
+    speculative_retrieval_enabled: bool = False
     speculative_confidence_threshold: float = 0.8
+
+    # ---- Embedding 进程内缓存 ----
+    # ingest 阶段关键词/fact 内容跨消息大量重复，缓存后同一进程内只 embed 一次。
+    # 每个 key 含 model+dim，换配置自然失效；FIFO 淘汰，达 max 后弹最早一条。
+    embedding_cache_max: int = 4096
 
 
 # 全局单例配置实例，供各模块直接导入使用

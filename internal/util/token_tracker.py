@@ -2,7 +2,7 @@
 
 进程内三客户端（llm/embedding/judge）每次调用后调用 tracker.add(...)：
   - 累加到内存计数器（用于 run 末汇总）
-  - 追加一行 JSONL 到 /home/manjaro/AI/TokenLog/YYYY-MM-DD/{model}_HHMMSS.jsonl
+  - 追加一行 JSONL 到 ~/AI/TokenLog/YYYY-MM-DD/{model}_HHMMSS.jsonl
 
 文件粒度：按进程启动日期分文件夹，文件名后缀是进程启动时间（HHMMSS）。
 同一进程的 3 个模型文件同组，跨进程互不覆盖。
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-LOG_ROOT = Path("/home/manjaro/AI/TokenLog")
+LOG_ROOT = Path.home() / "AI" / "TokenLog"
 
 
 @dataclass

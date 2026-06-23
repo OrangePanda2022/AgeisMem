@@ -13,6 +13,8 @@ wheels/
 .env
 .env.*
 !.env.example
+key.txt
+*.key
 
 # Datasets (large; download separately)
 LongMemEval/data/

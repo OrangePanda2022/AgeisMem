@@ -9,8 +9,8 @@ rankings 来源：AegisMem `answer(return_evidence=True)` 返回的 evidence，�
 
 用法：
   PYTHONPATH=. uv run python scripts/score_retrieval.py \\
-      --hyp /home/manjaro/tmp/lme_oracle.jsonl \\
-      --ref /home/manjaro/AI/LongMemEval/data/longmemeval_oracle.json
+      --hyp ~/tmp/lme_oracle.jsonl \\
+      --ref ../LongMemEval/data/longmemeval_oracle.json
 
 支持断点续跑（--resume）与 errors.jsonl 错误隔离。
 """
@@ -37,6 +37,11 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger("score_retrieval")
+
+
+# 参考数据路径基于 __file__ 推导（仓库同级 ../LongMemEval/data），跨机器可移植。
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_ORACLE = str(_REPO_ROOT.parent / "LongMemEval" / "data" / "longmemeval_oracle.json")
 
 
 KS = [1, 3, 5, 10, 30, 50]
@@ -176,7 +181,7 @@ def has_target_user_turn(ref_entry: dict) -> bool:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="LongMemEval Retrieval Scorer")
     parser.add_argument("--hyp", required=True, help="evaluate_longmemeval 输出 jsonl（含 evidence）")
-    parser.add_argument("--ref", default="/home/manjaro/AI/LongMemEval/data/longmemeval_oracle.json",
+    parser.add_argument("--ref", default=_DEFAULT_ORACLE,
                         help="LongMemEval 参考 JSON")
     parser.add_argument("--out", default=None,
                         help="检索评分输出 jsonl，默认 <hyp>.retrieval.jsonl")

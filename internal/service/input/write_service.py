@@ -76,10 +76,27 @@ class WriteService:
             return []
 
         results: list[Fact] = []
-        for item in facts_list:
+        if not facts_list:
+            return results
+
+        # 批量预嵌入所有 fact content（一次 API 替代逐个 embed_text）。
+        # N 个 fact 的 content 之间无依赖，可一次性 embed_texts 拿回全部向量，
+        # 再透传给 _process_fact 跳过其内部的单次 embed_text。
+        contents = [(item.get("content") or "").strip() for item in facts_list]
+        valid_idx = [i for i, c in enumerate(contents) if c]
+        emb_map: dict[int, list[float]] = {}
+        if valid_idx:
+            batch = await self.c.embedder.embed_texts([contents[i] for i in valid_idx])
+            for i, emb in zip(valid_idx, batch):
+                emb_map[i] = emb
+
+        for idx, item in enumerate(facts_list):
             try:
                 pre_entities = item.get("entities", [])
-                fact = await self._process_fact(item, raw_message, event_time, pre_entities, provenance=provenance)
+                fact = await self._process_fact(
+                    item, raw_message, event_time, pre_entities,
+                    fact_embedding=emb_map.get(idx), provenance=provenance,
+                )
                 if fact:
                     results.append(fact)
             except Exception as e:
@@ -90,6 +107,7 @@ class WriteService:
         self, item: dict, raw_message: str, event_time: datetime | None,
         pre_extracted_entities: list[str] | None = None,
         *,
+        fact_embedding: list[float] | None = None,
         provenance: dict | None = None,
     ) -> Fact | None:
         content = (item.get("content") or "").strip()
@@ -108,8 +126,8 @@ class WriteService:
         if meta.HappendTime is None and meta.MentionedTime is not None:
             meta.HappendTime = meta.MentionedTime
 
-        # 1) Fact embedding
-        embedding = await self.c.embedder.embed_text(content)
+        # 1) Fact embedding — 优先复用 ingest 阶段批量预算好的向量，省掉单次 API 调用
+        embedding = fact_embedding if fact_embedding is not None else await self.c.embedder.embed_text(content)
 
         # 2) Tag 填充：用 fact 提取时已获得的 entities 跳过 LLM 调用
         tags = await self._build_tags(content, pre_extracted_entities, fact_embedding=embedding)

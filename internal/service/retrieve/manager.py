@@ -14,6 +14,7 @@ from internal.config.settings import settings
 from internal.domain.model.fact import Fact
 from internal.domain.services.mas_manager import MASManager
 from internal.infra.container import Container
+from internal.util.call_trace import get_trace
 from internal.util.debug_collector import DebugCollector
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,9 @@ class MASComputeService:
           - membox_event_time: 从 metadata.HappendTime 获取
           - reference_time: 透传给 recency 计算，避免墙钟差异
         """
+        if (t := get_trace()) is not None:
+            t.mas_calls += 1
+            t.mark("mas")
         scored: list[tuple[Fact, float]] = []
         breakdowns: list[dict] = [] if debug is not None else []
         for f in facts:

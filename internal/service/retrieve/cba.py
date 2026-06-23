@@ -14,6 +14,7 @@ import logging
 from internal.domain.model.buffer import DialogTurn, MessageBuffer
 from internal.domain.model.fact import Fact
 from internal.domain.services.context_budget_allocator import ContextBudgetAllocator
+from internal.util.call_trace import get_trace
 from internal.util.debug_collector import DebugCollector
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,9 @@ class CBAService:
         *,
         debug: DebugCollector | None = None,
     ) -> list[tuple[Fact, int]]:
+        if (t := get_trace()) is not None:
+            t.cba_allocate += 1
+            t.mark("cba.allocate")
         if total_budget is None:
             total_budget = 4000
         allocated = self._allocator.allocate(scored_facts, total_budget)
@@ -77,6 +81,9 @@ class CBAService:
         Organization/Preference/HappendTime/MentionedTime/History）、original_msg、tags。
         事实按 created_at 升序排列，便于 LLM 做时序推理。
         """
+        if (t := get_trace()) is not None:
+            t.cba_build_context += 1
+            t.mark("cba.build_context")
         parts = ["[记忆片段]"]
 
         # 按 created_at 升序排，便于时序推理；缺失时间的放在最后

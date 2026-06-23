@@ -25,6 +25,7 @@ from json_repair import repair_json
 from internal.infra.models.llm.prompts.prompts import prompts
 from internal.config.settings import settings
 from internal.util.api_retry import get_semaphore, with_retry
+from internal.util.call_trace import get_trace
 from internal.util.debug_collector import DebugCollector
 from internal.util.token_tracker import tracker as token_tracker
 
@@ -89,6 +90,12 @@ class LLMClient:
                 completion=getattr(usage, "completion_tokens", 0) or 0,
                 total=getattr(usage, "total_tokens", 0) or 0,
             )
+        # 单题调用追踪：LLM API 计数 + 模型内部 CoT 原文（reasoning_content）
+        if (t := get_trace()) is not None:
+            t.llm_total += 1
+            msg_obj = message.choices[0].message
+            rc = getattr(msg_obj, "reasoning_content", None) or getattr(msg_obj, "reasoning", None) or ""
+            t.llm_reasoning_texts.append(rc)
         content = message.choices[0].message.content or ""
         logger.debug("LLM response: %s", content[:300])
         return content
@@ -164,6 +171,8 @@ class LLMClient:
 
     # 提取实体
     async def extract_entities(self, text: str) -> list[str]:
+        if (t := get_trace()) is not None:
+            t.llm_method("extract_entities")
         response = await self.generate(prompts.ENTITY_EXTRACTION_SYSTEM, text, max_tokens=2048)
         result = self._parse_json(response)
         return result.get("entities", [])
@@ -186,6 +195,8 @@ class LLMClient:
             包含 answer、confidence、reasoning 的字典。
         """
         # 语言提示：根据问题语言决定输出语言，避免中文上下文导致英文问题输出中文
+        if (t := get_trace()) is not None:
+            t.llm_method("generate_answer")
         lang_hint = "IMPORTANT: Write your answer in English." if all(ord(c) < 0x4e00 for c in query[:50]) else ""
         ref_line = f"\n参考时间（当前时刻）：{reference_time}\n" if reference_time else ""
         user_message = f"问题：{query}\n\n记忆上下文：\n{context}{ref_line}\n\n{lang_hint}"
@@ -214,6 +225,8 @@ class LLMClient:
         Returns:
             包含 sufficient、confidence、reasoning、alternative_keywords 的字典。
         """
+        if (t := get_trace()) is not None:
+            t.llm_method("check_sufficiency")
         user_message = json.dumps({
             "query": query,
             "retrieved_context_summary": context_summary,
@@ -244,6 +257,8 @@ class LLMClient:
         Returns:
             {"expected_entities": [...], "missing_in_top": [...]}
         """
+        if (t := get_trace()) is not None:
+            t.llm_method("extract_expected_entities")
         user_message = json.dumps({
             "query": query,
             "top_retrieved_facts": top_facts_summary,
@@ -279,6 +294,8 @@ class LLMClient:
         Returns:
             包含 answer、confidence、reasoning 的字典。
         """
+        if (t := get_trace()) is not None:
+            t.llm_method("debate_answer")
         import asyncio
 
         lang_hint = "IMPORTANT: Write your answer in English." if all(ord(c) < 0x4e00 for c in query[:50]) else ""

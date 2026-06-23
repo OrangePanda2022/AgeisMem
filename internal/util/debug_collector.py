@@ -4,7 +4,7 @@
     debug = DebugCollector(qid="0bb5a684", query="...")
     debug.record("keywords", {"raw": [...], "fallback": False})
     ...
-    debug.dump("/home/manjaro/tmp/debug_xxx.json")
+    debug.dump("~/tmp/debug_xxx.json")
 
 设计原则：
     - 不引入全局状态：实例由 pipeline 入口构造，显式传给各 service。

@@ -28,6 +28,7 @@ from internal.service.input.write_service import WriteService
 from internal.service.retrieve.cba import CBAService
 from internal.service.retrieve.manager import MASComputeService
 from internal.service.retrieve.recall import RecallService
+from internal.util.call_trace import CallTrace, get_trace, trace_scope
 from internal.util.debug_collector import DebugCollector
 
 logging.basicConfig(
@@ -66,6 +67,9 @@ class MemoryRetrievalPipeline:
         self.cba = CBAService()
         self.buffer = MessageBuffer(max_size=20)
         self._forgetting = ForgettingService(self.container)
+        # 最近一次 answer() 的调用追踪；eval 脚本读取后写入 call_log.jsonl。
+        # 每题独立 pipeline 实例，故并发下无共享问题。
+        self.last_trace: CallTrace | None = None
 
     @staticmethod
     def _evidence_list(scored: list[tuple]) -> list[dict]:
@@ -127,6 +131,29 @@ class MemoryRetrievalPipeline:
         qid: str = "ad-hoc",
         return_evidence: bool = False,
     ):
+        """基于记忆检索回答用户问题（公共入口：建立单题调用追踪后委托 _answer_body）。
+
+        trace 经 trace_scope 绑定到 contextvar，整个 retrieve 管线（含 LLM/Embedding
+        等单例客户端）通过 get_trace() 自增计数器；with 退出时自动 reset 防 contextvar 泄漏。
+        trace 同时挂在 self.last_trace 供 eval 脚本读取。
+        """
+        trace = CallTrace(qid=qid)
+        self.last_trace = trace
+        with trace_scope(trace):
+            return await self._answer_body(
+                query, reference_time,
+                debug_path=debug_path, qid=qid, return_evidence=return_evidence,
+            )
+
+    async def _answer_body(
+        self,
+        query: str,
+        reference_time: datetime | None = None,
+        *,
+        debug_path: str | None = None,
+        qid: str = "ad-hoc",
+        return_evidence: bool = False,
+    ):
         """基于记忆检索回答用户问题。
 
         完整流程：
@@ -148,9 +175,13 @@ class MemoryRetrievalPipeline:
             )
         except Exception as e:
             logger.warning("Forgetting cycle failed: %s", e)
+        if (t := get_trace()) is not None:
+            t.mark("forgetting")
 
         # 1) 嵌入查询
         query_emb = await self.container.embedder.embed_text(query)
+        if (t := get_trace()) is not None:
+            t.mark("query_embed")
         if debug is not None:
             debug.record("query_embed", {
                 "dim": len(query_emb),
@@ -195,6 +226,8 @@ class MemoryRetrievalPipeline:
             )
             missing_entities = expected.get("missing_in_top", [])
             if missing_entities:
+                if (t := get_trace()) is not None:
+                    t.mark("reverse_entity_expansion")
                 logger.info(
                     "Expected entities missing in top-%d: %s — triggering reverse expansion",
                     top_for_check, missing_entities,
@@ -249,6 +282,9 @@ class MemoryRetrievalPipeline:
         if settings.iterative_retrieval_enabled:
             max_rounds = settings.iterative_retrieval_max_rounds
             for round_idx in range(max_rounds):
+                if (t := get_trace()) is not None:
+                    t.iterative_rounds += 1
+                    t.mark("iterative_round")
                 # 构建紧凑摘要
                 top_n = min(10, len(scored))
                 summary_parts = []
@@ -358,6 +394,10 @@ class MemoryRetrievalPipeline:
         context = await self.cba.build_retrieval_context(
             budgeted, self.buffer, debug=debug,
         )
+        # 单题调用追踪:最终喂给 LLM 的 context(CBA 预算分配后的 fact 总数 + 字符长度,整题唯一)
+        if (t := get_trace()) is not None:
+            t.final_fact_count = len(budgeted)
+            t.final_context_char_length = len(context)
 
         # 6) 生成答案（方案C：偏好类问题启用辩论模式）
         is_preference = any(

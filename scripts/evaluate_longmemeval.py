@@ -5,16 +5,16 @@
 用法：
   PYTHONPATH=. uv run python scripts/evaluate_longmemeval.py \\
       --data longmemeval_oracle.json \\
-      --output /tmp/results.jsonl \\
+      --output ~/tmp/results.jsonl \\
       --max 10
 
 如果 --data 给的是相对路径或仅文件名，会去 --data-dir 下查找；
-默认数据目录为 /home/manjaro/AI/LongMemEval/data。
+默认数据目录为仓库同级 ../LongMemEval/data（由 __file__ 推导，跨机器可移植）。
 
 评测脚本特性：
   - checkpoint：output 文件中已有的 question_id 会被跳过（append 模式）
   - reference_time：使用题目最大 haystack date 作为遗忘衰减锚点
-  - 资源清理：每题完成后关闭 DB 连接并删除 /tmp/eval_*.db
+  - 资源清理：每题完成后关闭 DB 连接并删除 ~/tmp/eval_*.db
   - 容错：单题异常/超时不影响其他题，错误记入 errors.jsonl
   - LLM/Embedding 限流由 settings.llm_max_concurrency 等控制（客户端层信号量）
 """
@@ -38,8 +38,10 @@ logging.basicConfig(
 logger = logging.getLogger("longmemeval")
 
 
-DEFAULT_DATA_DIR = "/home/manjaro/AI/LongMemEval/data"
-DEFAULT_TMP_DIR = "/home/manjaro/tmp"
+# 路径基于 __file__ 推导，相对本仓库根目录，避免硬编码机器相关绝对路径。
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DATA_DIR = str(_REPO_ROOT.parent / "LongMemEval" / "data")
+DEFAULT_TMP_DIR = str(Path.home() / "tmp")
 DEFAULT_PER_ITEM_TIMEOUT = 720  # 单题超时（秒）
 
 
@@ -122,7 +124,7 @@ async def main() -> None:
                         help="LongMemEval JSON 文件名或路径（如 longmemeval_oracle.json）")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
                         help=f"本地 LongMemEval 数据目录（默认 {DEFAULT_DATA_DIR}）")
-    parser.add_argument("--output", type=str, default="/home/manjaro/tmp/longmemeval_results.jsonl",
+    parser.add_argument("--output", type=str, default=str(Path(DEFAULT_TMP_DIR) / "longmemeval_results.jsonl"),
                         help="Output JSONL file for hypotheses（append 模式，已有 qid 自动跳过）")
     parser.add_argument("--errors", type=str, default=None,
                         help="错误记录文件，默认与 --output 同目录的 errors.jsonl")
@@ -136,6 +138,8 @@ async def main() -> None:
                         help=f"单题超时秒数（默认 {DEFAULT_PER_ITEM_TIMEOUT}）")
     parser.add_argument("--no-resume", action="store_true",
                         help="忽略已存在的 output 文件，从头跑（会覆盖）")
+    parser.add_argument("--call-log", type=str, default=None,
+                        help="单题调用追踪 JSONL（默认与 --output 同目录的 call_log.jsonl，append 模式）")
     args = parser.parse_args()
 
     try:
@@ -151,8 +155,14 @@ async def main() -> None:
     from main import MemoryRetrievalPipeline
     from internal.infra.database.sqlite import reset_db, _db_map
 
-    with open(args.data, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    # 流式加载:s_cleaned/m_cleaned 可达 2.6GB,json.load 会 OOM;
+    # 用 ijson 逐对象解析(峰值仅约单题大小 + 物化后的列表)。
+    # 物化成 list 以保留下游 len()/enumerate/[:max] 语义不变。
+    import ijson
+    data: list[dict] = []
+    with open(args.data, "rb") as f:
+        for obj in ijson.items(f, "item"):
+            data.append(obj)
 
     items = data[:args.max] if args.max else data
 
@@ -161,26 +171,41 @@ async def main() -> None:
     errors_path = Path(args.errors) if args.errors else output_path.with_name("errors.jsonl")
     tmp_dir = Path(args.tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    call_log_path = Path(args.call_log) if args.call_log else output_path.with_name("call_log.jsonl")
 
     if args.no_resume and output_path.exists():
         output_path.unlink()
+    if args.no_resume and call_log_path.exists():
+        call_log_path.unlink()
     done_qids = _load_completed_qids(str(output_path))
+    # call_log 与 results 共享 resume 跳过集：任一文件含 qid 即视为已完成，避免重复追踪
+    done_call_qids = _load_completed_qids(str(call_log_path))
+    skipped_qids = done_qids | done_call_qids
     if done_qids:
         logger.info("Resume mode: %d question_id already in %s, will skip",
                     len(done_qids), output_path)
+    if done_call_qids:
+        logger.info("Resume mode: %d question_id already in %s, will skip",
+                    len(done_call_qids), call_log_path)
 
-    pending = [(i, e) for i, e in enumerate(items) if e.get("question_id") not in done_qids]
+    pending = [(i, e) for i, e in enumerate(items) if e.get("question_id") not in skipped_qids]
     logger.info("Evaluating %d items (%d total, %d skipped)",
                 len(pending), len(items), len(items) - len(pending))
 
     sem = asyncio.Semaphore(args.concurrency)
     write_lock = asyncio.Lock()
     error_lock = asyncio.Lock()
+    call_log_lock = asyncio.Lock()
     completed = 0
 
     async def write_result(record: dict) -> None:
         async with write_lock:
             with output_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    async def write_call_log(record: dict) -> None:
+        async with call_log_lock:
+            with call_log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     async def write_error(record: dict) -> None:
@@ -228,6 +253,7 @@ async def main() -> None:
             ref_time = _parse_lme_date(entry.get("question_date")) or _max_haystack_time(dates)
             result = await pipeline.answer(
                 entry["question"], reference_time=ref_time, return_evidence=True,
+                qid=qid,
             )
             hypothesis = result["answer"] if isinstance(result, dict) else result
             evidence = result.get("evidence", []) if isinstance(result, dict) else []
@@ -238,6 +264,14 @@ async def main() -> None:
                 "evidence": evidence,
             })
             completed += 1
+
+            # 单题调用追踪：读取 answer() 期间经 contextvar 累积的 CallTrace，写入 call_log.jsonl。
+            # results 先写（评测真值），call_log 后写；超时/异常的题不会走到这里，
+            # last_trace 可能残缺故不写，留待 resume 重跑。
+            trace_rec: dict = {"question_id": qid}
+            if pipeline.last_trace is not None:
+                trace_rec.update(pipeline.last_trace.to_dict())
+            await write_call_log(trace_rec)
 
             logger.info("  [%d/%d] Q: %s", idx + 1, len(items), entry["question"][:60])
             logger.info("  [%d/%d] A: %s", idx + 1, len(items), str(hypothesis)[:60])

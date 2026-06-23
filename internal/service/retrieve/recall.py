@@ -28,6 +28,7 @@ from internal.config.settings import settings
 from internal.domain.model.edge import Edge
 from internal.domain.model.fact import Fact
 from internal.infra.container import Container
+from internal.util.call_trace import get_trace
 from internal.util.debug_collector import DebugCollector
 from internal.util.rrf import rrf_merge
 
@@ -176,6 +177,10 @@ class RecallService:
         *, pre_extracted_entities: list[str] | None = None,
         debug: DebugCollector | None = None,
     ) -> RecallResult:
+        # 单题调用追踪：4 路召回触发计数（主召回/反向扩展/迭代轮均经此唯一入口）
+        if (t := get_trace()) is not None:
+            t.recall_calls += 1
+            t.mark("keyword_recall")
         # 1) LLM 提取关键词（或使用预提取的关键词）
         fallback_used = False
         if pre_extracted_entities is not None:
@@ -333,6 +338,14 @@ class RecallService:
             fused.append((fid, score))
         fused.sort(key=lambda kv: kv[1], reverse=True)
 
+        # 单题调用追踪:每路找回 fact 数 + RRF 融合去重后数(累计,跨多次召回)
+        if (t := get_trace()) is not None:
+            t.add_recall_facts(
+                bm25=len(bm25_facts), trigram=len(tri_facts),
+                vec=len(vec_facts), tag=len(tag_facts),
+                fused=len(fused),
+            )
+
         result = RecallResult()
         for fid, score in fused:
             fact = id_to_fact.get(fid)
@@ -484,6 +497,9 @@ class RecallService:
         *, debug: DebugCollector | None = None,
     ) -> RecallResult:
         """仅跑向量搜索一路作为 draft，跳过实体抽取和其他三路。"""
+        if (t := get_trace()) is not None:
+            t.draft_calls += 1
+            t.mark("draft_recall")
         vec_facts = await self.c.facts.vector_search_with_scores(
             query_embedding, top_k=settings.retrieve_top_k_fact_vec,
         )
@@ -504,6 +520,10 @@ class RecallService:
                 result.facts.append(fact)
                 result.source_scores[fid] = score_n
         result.seed_facts = list(result.facts)
+
+        # 单题调用追踪:投机召回仅 vec 一路,fused 即去重后 result.facts(累计)
+        if (t := get_trace()) is not None:
+            t.add_recall_facts(vec=len(vec_facts), fused=len(result.facts))
 
         if debug is not None:
             debug.record("draft_recall", {
@@ -592,6 +612,13 @@ class RecallService:
                     for f in expanded[:30]
                 ],
             })
+
+        # 单题调用追踪：图游走节点数累计（一题可能多次 graph_walk，累加而非覆盖）
+        if (t := get_trace()) is not None:
+            t.graph_walk_calls += 1
+            t.graph_walk_nodes_visited += len(visited)   # 含种子节点
+            t.graph_walk_nodes_expanded += len(expanded)  # 仅新增节点
+            t.mark("graph_walk")
 
         return expanded
 

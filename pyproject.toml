@@ -8,9 +8,13 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "anthropic>=0.107.1",
     "asyncio>=4.0.0",
+    "ijson>=3.5.0",
     "json-repair>=0.60.1",
     "numpy>=2.4.6",
     "openai>=2.41.0",
     "pydantic-settings>=2.14.1",
     "sqlite-vec>=0.1.9",
 ]
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

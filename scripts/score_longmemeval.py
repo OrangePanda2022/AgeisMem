@@ -8,8 +8,8 @@ Judge 调用参数对齐官方：temperature=0、max_tokens=10、无 reasoning_e
 
 用法：
   PYTHONPATH=. uv run python scripts/score_longmemeval.py \\
-      --hyp /home/manjaro/tmp/lme_oracle.jsonl \\
-      --ref /home/manjaro/AI/LongMemEval/data/longmemeval_oracle.json
+      --hyp ~/tmp/lme_oracle.jsonl \\
+      --ref ../LongMemEval/data/longmemeval_oracle.json
 
 打分前请确保 settings.judge_api_key / judge_base_url / judge_model 已填。
 """
@@ -30,6 +30,11 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger("score_longmemeval")
+
+
+# 参考数据路径基于 __file__ 推导（仓库同级 ../LongMemEval/data），跨机器可移植。
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_ORACLE = str(_REPO_ROOT.parent / "LongMemEval" / "data" / "longmemeval_oracle.json")
 
 
 # 官方 prompt 模板（逐字复刻自 LongMemEval/src/evaluation/evaluate_qa.py）
@@ -112,7 +117,14 @@ def _load_jsonl_or_json(path: str) -> list[dict]:
     text = Path(path).read_text(encoding="utf-8")
     text_strip = text.lstrip()
     if text_strip.startswith("["):
-        return json.loads(text)
+        # 顶层数组:大文件(s_cleaned 265MB / m_cleaned 2.6GB)用 ijson 流式,
+        # 避免 read_text + json.loads 双倍内存峰值导致 OOM。
+        import ijson
+        out: list[dict] = []
+        with open(path, "rb") as f:
+            for obj in ijson.items(f, "item"):
+                out.append(obj)
+        return out
     out: list[dict] = []
     for line in text.splitlines():
         line = line.strip()
@@ -125,7 +137,7 @@ def _load_jsonl_or_json(path: str) -> list[dict]:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="LongMemEval QA Scorer (official-aligned)")
     parser.add_argument("--hyp", required=True, help="hypothesis jsonl 文件")
-    parser.add_argument("--ref", default="/home/manjaro/AI/LongMemEval/data/longmemeval_oracle.json",
+    parser.add_argument("--ref", default=_DEFAULT_ORACLE,
                         help="LongMemEval 参考 JSON")
     parser.add_argument("--out", default=None,
                         help="评分结果输出 jsonl，默认 <hyp>.scored.jsonl")
